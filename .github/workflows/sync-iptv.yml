@@ -3,10 +3,10 @@ name: Sync M3U to Root
 on:
   schedule:
     - cron: '0 0 * * *'  # 每天执行一次
-  workflow_dispatch:     # 手动触发
+  workflow_dispatch:     # 支持手动触发
 
 permissions:
-  contents: write
+  contents: write        # 必须保留，否则没有权限推送文件
 
 jobs:
   sync:
@@ -17,20 +17,27 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0 # 完整拉取历史，确保 push 顺畅
 
-      # 🔽 仅下载你需要的特定源 1
+      # 第一步：下载并重命名第一个源
       - name: Download sports.m3u as Nowsports.m3u
         run: |
-          echo "正在下载 sports.m3u 并重命名..."
+          echo "正在下载第一个源..."
           curl -L -o "Nowsports.m3u" "https://raw.githubusercontent.com/ediart/tvbox/refs/heads/main/TVBoxOSC/tvbox/sports.m3u"
 
-      # 🔽 仅下载你需要的特定源 2
+      # 第二步：下载第二个源
       - name: Download StarHub.m3u
         run: |
-          echo "正在下载 StarHub.m3u..."
+          echo "正在下载第二个源..."
           curl -L -o "StarHub.m3u" "https://raw.githubusercontent.com/AbidUrsa/StarHubPlaylist/refs/heads/main/StarHub.m3u"
 
-      # 提交并推送修改
+      # 第三步：验证文件是否存在（这是调试的关键）
+      - name: Check files info
+        run: |
+          echo "=== 当前根目录文件列表 ==="
+          ls -lh *.m3u || echo "警告：未找到任何 .m3u 文件"
+
+      # 第四步：提交并推送
       - name: Commit and Push if changed
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -39,15 +46,18 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # 仅添加当前目录下的 m3u/m3u8 文件
-          git add *.m3u *.m3u8 2>/dev/null || true
-
+          # 1. 强制添加所有 m3u 文件
+          git add Nowsports.m3u StarHub.m3u
+          
+          # 2. 检查是否有实际差异
           if git diff --cached --quiet; then
-            echo "没有检测到任何更新。"
+            echo "文件内容与仓库内已有文件完全一致，跳过提交。"
             exit 0
           fi
 
-          git commit -m "Update M3U playlists: Nowsports and StarHub"
+          # 3. 提交更改
+          git commit -m "自动更新: Nowsports.m3u 和 StarHub.m3u ($(date +'%Y-%m-%d %H:%M'))"
 
+          # 4. 推送到远程分支
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push origin HEAD:${GITHUB_REF#refs/heads/}
+          git push origin HEAD:${{ github.ref_name }}
